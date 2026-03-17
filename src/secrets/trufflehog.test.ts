@@ -1,5 +1,13 @@
-import { describe, expect, test } from "bun:test";
-import { mapToLocations, parseNDJSON } from "./trufflehog";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { mapToLocations, parseNDJSON, TruffleHogDetector } from "./trufflehog";
+
+mock.module("../config", () => ({
+  getConfig: () => ({
+    secrets_detection: {
+      trufflehog: { binary_path: "trufflehog", timeout: 10, enabled: true },
+    },
+  }),
+}));
 
 describe("parseNDJSON", () => {
   test("parses single result", () => {
@@ -91,9 +99,7 @@ describe("mapToLocations", () => {
 
     const locations = mapToLocations(text, results);
     expect(locations).toHaveLength(1);
-    expect(text.slice(locations[0].start, locations[0].end)).toBe(
-      "xoxb-full-secret-token-value",
-    );
+    expect(text.slice(locations[0].start, locations[0].end)).toBe("xoxb-full-secret-token-value");
   });
 
   test("finds multiple occurrences of same value", () => {
@@ -147,5 +153,123 @@ describe("mapToLocations", () => {
     const locations = mapToLocations(text, results);
     expect(locations).toHaveLength(1);
     expect(locations[0].type).toBe("TRUFFLEHOG_CustomDetector");
+  });
+});
+
+function makeStream(content: string): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      if (content) controller.enqueue(new TextEncoder().encode(content));
+      controller.close();
+    },
+  });
+}
+
+function mockProcess(stdout: string, stderr: string, exitCode: number) {
+  return {
+    stdout: makeStream(stdout),
+    stderr: makeStream(stderr),
+    stdin: { write: mock(() => Promise.resolve(stdout.length)), end: mock(() => {}) },
+    exited: Promise.resolve(exitCode),
+    kill: mock(() => {}),
+  };
+}
+
+describe("TruffleHogDetector", () => {
+  let spawnSpy: ReturnType<typeof spyOn>;
+
+  afterEach(() => {
+    spawnSpy?.mockRestore();
+  });
+
+  test("detect() returns empty result for empty text without spawning", async () => {
+    spawnSpy = spyOn(Bun, "spawn");
+    const detector = new TruffleHogDetector();
+    const result = await detector.detect("");
+    expect(result.detected).toBe(false);
+    expect(result.matches).toHaveLength(0);
+    expect(spawnSpy).not.toHaveBeenCalled();
+  });
+
+  test("detect() calls subprocess with correct args", async () => {
+    const proc = mockProcess("", "", 0);
+    spawnSpy = spyOn(Bun, "spawn").mockReturnValue(proc as unknown as ReturnType<typeof Bun.spawn>);
+
+    const detector = new TruffleHogDetector();
+    await detector.detect("some text");
+
+    expect(spawnSpy).toHaveBeenCalledWith(
+      ["trufflehog", "stdin", "--no-verification", "--json"],
+      expect.objectContaining({ stdin: "pipe", stdout: "pipe", stderr: "pipe" }),
+    );
+  });
+
+  test("detect() parses subprocess output and maps locations", async () => {
+    const awsKey = "AKIAIOSFODNN7EXAMPLE";
+    const ndjson = JSON.stringify({ DetectorName: "AWS", Raw: awsKey });
+    const proc = mockProcess(ndjson, "", 0);
+    spawnSpy = spyOn(Bun, "spawn").mockReturnValue(proc as unknown as ReturnType<typeof Bun.spawn>);
+
+    const detector = new TruffleHogDetector();
+    const text = `AWS key: ${awsKey}`;
+    const result = await detector.detect(text);
+
+    expect(result.detected).toBe(true);
+    expect(result.matches).toHaveLength(1);
+    expect(result.matches[0].type).toBe("TRUFFLEHOG_AWS");
+    expect(result.locations).toBeDefined();
+    expect(result.locations![0].start).toBe(text.indexOf(awsKey));
+  });
+
+  test("detect() returns empty result when subprocess exits non-zero (graceful degradation)", async () => {
+    const proc = mockProcess("", "fatal error", 1);
+    spawnSpy = spyOn(Bun, "spawn").mockReturnValue(proc as unknown as ReturnType<typeof Bun.spawn>);
+
+    const detector = new TruffleHogDetector();
+    const result = await detector.detect("some text");
+
+    expect(result.detected).toBe(false);
+    expect(result.matches).toHaveLength(0);
+  });
+
+  test("detect() returns empty result when binary is not found (ENOENT)", async () => {
+    spawnSpy = spyOn(Bun, "spawn").mockImplementation(() => {
+      const err = new Error("No such file or directory");
+      (err as NodeJS.ErrnoException).code = "ENOENT";
+      throw err;
+    });
+
+    const detector = new TruffleHogDetector();
+    const result = await detector.detect("some text");
+
+    expect(result.detected).toBe(false);
+    expect(result.matches).toHaveLength(0);
+  });
+
+  test("healthCheck() returns true when binary exits with code 0", async () => {
+    const proc = mockProcess("v3.93.8", "", 0);
+    spawnSpy = spyOn(Bun, "spawn").mockReturnValue(proc as unknown as ReturnType<typeof Bun.spawn>);
+
+    const detector = new TruffleHogDetector();
+    expect(await detector.healthCheck()).toBe(true);
+  });
+
+  test("healthCheck() returns false when binary exits with non-zero code", async () => {
+    const proc = mockProcess("", "error", 1);
+    spawnSpy = spyOn(Bun, "spawn").mockReturnValue(proc as unknown as ReturnType<typeof Bun.spawn>);
+
+    const detector = new TruffleHogDetector();
+    expect(await detector.healthCheck()).toBe(false);
+  });
+
+  test("healthCheck() returns false when binary is not found (ENOENT)", async () => {
+    spawnSpy = spyOn(Bun, "spawn").mockImplementation(() => {
+      const err = new Error("No such file or directory");
+      (err as NodeJS.ErrnoException).code = "ENOENT";
+      throw err;
+    });
+
+    const detector = new TruffleHogDetector();
+    expect(await detector.healthCheck()).toBe(false);
   });
 });
