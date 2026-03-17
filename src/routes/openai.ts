@@ -68,8 +68,8 @@ openaiRoutes.post(
     let request = c.req.valid("json") as OpenAIRequest;
     const config = getConfig();
 
-    // Step 1: Process secrets
-    const secretsResult = processSecretsRequest(request, config.secrets_detection, openaiExtractor);
+    // Step 1: Process secrets (async to support TruffleHog subprocess)
+    const secretsResult = await processSecretsRequest(request, config.secrets_detection, openaiExtractor);
 
     if (secretsResult.blocked) {
       return respondBlocked(c, request, secretsResult, startTime);

@@ -106,6 +106,12 @@ const SecretEntityTypes = [
   "CONNECTION_STRING",
 ] as const;
 
+const TruffleHogSchema = z.object({
+  enabled: z.boolean().default(false),
+  binary_path: z.string().default("trufflehog"),
+  timeout: z.coerce.number().int().min(1).default(10),
+});
+
 const SecretsDetectionSchema = z.object({
   enabled: z.boolean().default(true),
   action: z.enum(["block", "mask", "route_local"]).default("mask"),
@@ -113,6 +119,7 @@ const SecretsDetectionSchema = z.object({
   max_scan_chars: z.coerce.number().int().min(0).default(200000),
   log_detected_types: z.boolean().default(true),
   scan_roles: z.array(z.string()).optional(),
+  trufflehog: TruffleHogSchema.default({}),
 });
 
 const ConfigSchema = z
@@ -164,6 +171,7 @@ export type AnthropicProviderConfig = z.infer<typeof AnthropicProviderSchema>;
 export type LocalProviderConfig = z.infer<typeof LocalProviderSchema>;
 export type MaskingConfig = z.infer<typeof MaskingSchema>;
 export type SecretsDetectionConfig = z.infer<typeof SecretsDetectionSchema>;
+export type TruffleHogConfig = z.infer<typeof TruffleHogSchema>;
 export type ServerConfig = z.infer<typeof ServerSchema>;
 
 /**

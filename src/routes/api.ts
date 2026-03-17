@@ -196,9 +196,10 @@ apiRoutes.post("/mask", async (c) => {
         entities: config.secrets_detection.entities,
         max_scan_chars: config.secrets_detection.max_scan_chars,
         log_detected_types: false,
+        trufflehog: config.secrets_detection.trufflehog,
       };
 
-      const secretsResult = detectSecrets(maskedText, secretsConfig);
+      const secretsResult = await detectSecrets(maskedText, secretsConfig);
 
       if (secretsResult.locations && secretsResult.locations.length > 0) {
         // Capture counters before masking to track new entities

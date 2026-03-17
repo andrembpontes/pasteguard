@@ -94,8 +94,8 @@ anthropicRoutes.post(
       );
     }
 
-    // Step 1: Process secrets
-    const secretsResult = processSecretsRequest(
+    // Step 1: Process secrets (async to support TruffleHog subprocess)
+    const secretsResult = await processSecretsRequest(
       request,
       config.secrets_detection,
       anthropicExtractor,

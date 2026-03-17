@@ -1,7 +1,7 @@
 /**
- * All supported secret entity types
+ * Built-in secret entity types
  */
-export type SecretEntityType =
+export type BuiltinSecretEntityType =
   | "OPENSSH_PRIVATE_KEY"
   | "PEM_PRIVATE_KEY"
   | "API_KEY_SK"
@@ -12,6 +12,11 @@ export type SecretEntityType =
   | "ENV_PASSWORD"
   | "ENV_SECRET"
   | "CONNECTION_STRING";
+
+/**
+ * All supported secret entity types (built-in + TruffleHog prefixed types)
+ */
+export type SecretEntityType = BuiltinSecretEntityType | `TRUFFLEHOG_${string}`;
 
 export interface SecretsMatch {
   type: SecretEntityType;

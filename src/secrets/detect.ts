@@ -7,6 +7,7 @@ import type {
   SecretsDetectionResult,
   SecretsMatch,
 } from "./patterns/types";
+import { getTruffleHogDetector } from "./trufflehog";
 
 export type {
   MessageSecretsResult,
@@ -18,6 +19,7 @@ export type {
 
 /**
  * Detects secret material (e.g. private keys, API keys, tokens) in text
+ * using built-in pattern detectors.
  *
  * Uses the pattern registry to scan for various secret types:
  * - Private keys: OpenSSH, PEM (RSA, generic, encrypted)
@@ -27,7 +29,7 @@ export type {
  *
  * Respects max_scan_chars limit for performance.
  */
-export function detectSecrets(
+export function detectSecretsBuiltin(
   text: string,
   config: SecretsDetectionConfig,
 ): SecretsDetectionResult {
@@ -68,13 +70,84 @@ export function detectSecrets(
 }
 
 /**
+ * Detects secrets in text using built-in detectors and optionally TruffleHog.
+ * Returns merged, deduplicated results.
+ */
+export async function detectSecrets(
+  text: string,
+  config: SecretsDetectionConfig,
+): Promise<SecretsDetectionResult> {
+  if (!config.enabled) {
+    return { detected: false, matches: [] };
+  }
+
+  // Run built-in detection (sync, fast)
+  const builtinResult = detectSecretsBuiltin(text, config);
+
+  // If TruffleHog is not enabled, return built-in results only
+  if (!config.trufflehog?.enabled) {
+    return builtinResult;
+  }
+
+  // Run TruffleHog detection in parallel
+  const textToScan = config.max_scan_chars > 0 ? text.slice(0, config.max_scan_chars) : text;
+  const truffleHogDetector = getTruffleHogDetector(config.trufflehog);
+  const truffleHogResult = await truffleHogDetector.detect(textToScan);
+
+  // Merge results, deduplicating overlapping locations
+  return mergeResults(builtinResult, truffleHogResult);
+}
+
+/**
+ * Merge built-in and TruffleHog results, deduplicating overlapping locations.
+ * Built-in results take priority at overlapping positions (more specific type names).
+ */
+export function mergeResults(
+  builtin: SecretsDetectionResult,
+  trufflehog: SecretsDetectionResult,
+): SecretsDetectionResult {
+  if (!trufflehog.detected) return builtin;
+  if (!builtin.detected) return trufflehog;
+
+  const builtinLocations = builtin.locations || [];
+  const trufflehogLocations = trufflehog.locations || [];
+
+  // Filter out TruffleHog locations that overlap with built-in locations
+  const filteredTHLocations = trufflehogLocations.filter((thLoc) => {
+    return !builtinLocations.some(
+      (bLoc) => thLoc.start < bLoc.end && thLoc.end > bLoc.start,
+    );
+  });
+
+  const allLocations = [...builtinLocations, ...filteredTHLocations];
+  allLocations.sort((a, b) => b.start - a.start);
+
+  // Rebuild matches from merged locations
+  const matchCounts = new Map<string, number>();
+  for (const loc of allLocations) {
+    matchCounts.set(loc.type, (matchCounts.get(loc.type) || 0) + 1);
+  }
+
+  const matches: SecretsMatch[] = [];
+  for (const [type, count] of matchCounts) {
+    matches.push({ type: type as SecretLocation["type"], count });
+  }
+
+  return {
+    detected: allLocations.length > 0,
+    matches,
+    locations: allLocations.length > 0 ? allLocations : undefined,
+  };
+}
+
+/**
  * Detects secrets in a request using an extractor
  */
-export function detectSecretsInRequest<TRequest, TResponse>(
+export async function detectSecretsInRequest<TRequest, TResponse>(
   request: TRequest,
   config: SecretsDetectionConfig,
   extractor: RequestExtractor<TRequest, TResponse>,
-): MessageSecretsResult {
+): Promise<MessageSecretsResult> {
   const spans = extractor.extractTexts(request);
   return detectSecretsInSpans(spans, config);
 }
@@ -82,10 +155,10 @@ export function detectSecretsInRequest<TRequest, TResponse>(
 /**
  * Detects secrets in text spans (low-level)
  */
-export function detectSecretsInSpans(
+export async function detectSecretsInSpans(
   spans: TextSpan[],
   config: SecretsDetectionConfig,
-): MessageSecretsResult {
+): Promise<MessageSecretsResult> {
   if (!config.enabled) {
     return {
       detected: false,
@@ -98,16 +171,18 @@ export function detectSecretsInSpans(
   const scanRoles = config.scan_roles ? new Set(config.scan_roles) : null;
 
   const matchCounts = new Map<string, number>();
-  const spanLocations: SecretLocation[][] = spans.map((span) => {
-    if (scanRoles && span.role && !scanRoles.has(span.role)) {
-      return [];
-    }
-    const result = detectSecrets(span.text, config);
-    for (const match of result.matches) {
-      matchCounts.set(match.type, (matchCounts.get(match.type) || 0) + match.count);
-    }
-    return result.locations || [];
-  });
+  const spanLocations: SecretLocation[][] = await Promise.all(
+    spans.map(async (span) => {
+      if (scanRoles && span.role && !scanRoles.has(span.role)) {
+        return [];
+      }
+      const result = await detectSecrets(span.text, config);
+      for (const match of result.matches) {
+        matchCounts.set(match.type, (matchCounts.get(match.type) || 0) + match.count);
+      }
+      return result.locations || [];
+    }),
+  );
 
   // Build matches array
   const allMatches: SecretsMatch[] = [];

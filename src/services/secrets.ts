@@ -21,16 +21,16 @@ export interface SecretsProcessResult<TRequest> {
 /**
  * Process a request for secrets detection
  */
-export function processSecretsRequest<TRequest, TResponse>(
+export async function processSecretsRequest<TRequest, TResponse>(
   request: TRequest,
   config: SecretsDetectionConfig,
   extractor: RequestExtractor<TRequest, TResponse>,
-): SecretsProcessResult<TRequest> {
+): Promise<SecretsProcessResult<TRequest>> {
   if (!config.enabled) {
     return { blocked: false, request, masked: false };
   }
 
-  const detection = detectSecretsInRequest(request, config, extractor);
+  const detection = await detectSecretsInRequest(request, config, extractor);
 
   if (!detection.detected) {
     return { blocked: false, request, detection, masked: false };
