@@ -33,6 +33,7 @@ logs/
 
 # Bun
 bun.lockb
+package-lock.json
 
 # Test
 coverage/
