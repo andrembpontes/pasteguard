@@ -31,7 +31,7 @@ import {
 import { unmaskSecretsResponse } from "../secrets/mask";
 import { logRequest } from "../services/logger";
 import { detectPII, maskPII, type PIIDetectResult } from "../services/pii";
-import { processSecretsRequest, type SecretsProcessResult } from "../services/secrets";
+import { processSecretsRequestAsync, type SecretsProcessResult } from "../services/secrets";
 import { extractTextContent } from "../utils/content";
 import {
   createLogData,
@@ -69,7 +69,11 @@ openaiRoutes.post(
     const config = getConfig();
 
     // Step 1: Process secrets
-    const secretsResult = processSecretsRequest(request, config.secrets_detection, openaiExtractor);
+    const secretsResult = await processSecretsRequestAsync(
+      request,
+      config.secrets_detection,
+      openaiExtractor,
+    );
 
     if (secretsResult.blocked) {
       return respondBlocked(c, request, secretsResult, startTime);

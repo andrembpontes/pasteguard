@@ -163,6 +163,14 @@ secrets_detection:
   #   - tool
   #   - function
 
+  # TruffleHog integration (optional, extends detection to 800+ secret types)
+  # Requires trufflehog binary installed (Docker image includes it automatically)
+  # Runs as a subprocess alongside built-in detectors; results are merged
+  # trufflehog:
+  #   enabled: false          # Opt-in, requires trufflehog binary
+  #   binary_path: trufflehog # Path to binary (default: looks in PATH)
+  #   timeout: 10             # Seconds, kill subprocess after this
+
 # Logging settings
 logging:
   # SQLite database for request logs

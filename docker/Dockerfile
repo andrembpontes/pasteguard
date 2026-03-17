@@ -53,6 +53,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# Install TruffleHog binary (optional secrets detection backend)
+ARG TRUFFLEHOG_VERSION=v3.93.8
+RUN curl -sSfL "https://github.com/trufflesecurity/trufflehog/releases/download/${TRUFFLEHOG_VERSION}/trufflehog_${TRUFFLEHOG_VERSION#v}_linux_amd64.tar.gz" \
+    | tar -xzf - -C /usr/local/bin trufflehog
+
 # Install Rust only if Japanese is included
 RUN if echo "${LANGUAGES}" | grep -q "ja"; then \
         apt-get update && apt-get install -y --no-install-recommends build-essential \
