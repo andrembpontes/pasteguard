@@ -9,16 +9,14 @@ export const healthRoutes = new Hono();
 healthRoutes.get("/health", async (c) => {
   const config = getConfig();
   const piiEnabled = config.pii_detection.enabled;
-  const truffleHogEnabled = config.secrets_detection.trufflehog?.enabled ?? false;
+  const truffleHogEnabled = config.secrets_detection.trufflehog.enabled;
 
   const [presidioHealth, localHealth, truffleHogHealth] = await Promise.all([
     piiEnabled ? checkPresidio() : Promise.resolve(true),
     config.mode === "route" && config.local
       ? checkLocalHealth(config.local)
       : Promise.resolve(true),
-    truffleHogEnabled
-      ? getTruffleHogDetector(config.secrets_detection.trufflehog).healthCheck()
-      : Promise.resolve(true),
+    truffleHogEnabled ? getTruffleHogDetector().healthCheck() : Promise.resolve(true),
   ]);
 
   const isHealthy = piiEnabled ? presidioHealth : true;

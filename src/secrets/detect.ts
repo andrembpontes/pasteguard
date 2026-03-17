@@ -41,7 +41,7 @@ export function detectSecretsBuiltin(
   const textToScan = config.max_scan_chars > 0 ? text.slice(0, config.max_scan_chars) : text;
 
   // Track which entities to detect based on config
-  const enabledTypes = new Set(config.entities);
+  const enabledTypes = new Set<string>(config.entities);
 
   // Aggregate results from all pattern detectors
   const allMatches: SecretsMatch[] = [];
@@ -81,18 +81,20 @@ export async function detectSecrets(
     return { detected: false, matches: [] };
   }
 
-  // Run built-in detection (sync, fast)
-  const builtinResult = detectSecretsBuiltin(text, config);
+  // Slice once here; pass pre-sliced text to both detectors
+  const textToScan = config.max_scan_chars > 0 ? text.slice(0, config.max_scan_chars) : text;
+  const noLimitConfig = { ...config, max_scan_chars: 0 };
 
   // If TruffleHog is not enabled, return built-in results only
-  if (!config.trufflehog?.enabled) {
-    return builtinResult;
+  if (!config.trufflehog.enabled) {
+    return detectSecretsBuiltin(textToScan, noLimitConfig);
   }
 
-  // Run TruffleHog detection in parallel
-  const textToScan = config.max_scan_chars > 0 ? text.slice(0, config.max_scan_chars) : text;
-  const truffleHogDetector = getTruffleHogDetector(config.trufflehog);
-  const truffleHogResult = await truffleHogDetector.detect(textToScan);
+  // Run built-in and TruffleHog detection in parallel
+  const [builtinResult, truffleHogResult] = await Promise.all([
+    Promise.resolve(detectSecretsBuiltin(textToScan, noLimitConfig)),
+    getTruffleHogDetector().detect(textToScan),
+  ]);
 
   // Merge results, deduplicating overlapping locations
   return mergeResults(builtinResult, truffleHogResult);
@@ -114,9 +116,7 @@ export function mergeResults(
 
   // Filter out TruffleHog locations that overlap with built-in locations
   const filteredTHLocations = trufflehogLocations.filter((thLoc) => {
-    return !builtinLocations.some(
-      (bLoc) => thLoc.start < bLoc.end && thLoc.end > bLoc.start,
-    );
+    return !builtinLocations.some((bLoc) => thLoc.start < bLoc.end && thLoc.end > bLoc.start);
   });
 
   const allLocations = [...builtinLocations, ...filteredTHLocations];
@@ -126,6 +126,14 @@ export function mergeResults(
   const matchCounts = new Map<string, number>();
   for (const loc of allLocations) {
     matchCounts.set(loc.type, (matchCounts.get(loc.type) || 0) + 1);
+  }
+
+  // Preserve builtin matches for types that have no corresponding location
+  // (e.g. detectors that report counts without offsets)
+  for (const m of builtin.matches) {
+    if (!allLocations.some((l) => l.type === m.type)) {
+      matchCounts.set(m.type, (matchCounts.get(m.type) || 0) + m.count);
+    }
   }
 
   const matches: SecretsMatch[] = [];

@@ -6,7 +6,7 @@
  * raw values in the original text.
  */
 
-import type { TruffleHogConfig } from "../config";
+import { getConfig } from "../config";
 import { HEALTH_CHECK_TIMEOUT_MS } from "../constants/timeouts";
 import type { SecretLocation, SecretsDetectionResult, SecretsMatch } from "./patterns/types";
 
@@ -52,7 +52,9 @@ export function mapToLocations(text: string, results: TruffleHogResult[]): Secre
   const locations: SecretLocation[] = [];
 
   for (const result of results) {
-    // Try RawV2 first (more specific), then Raw
+    // Prefer RawV2 (more specific/processed form) over Raw when available.
+    // Note: if the chosen value appears multiple times in text, indexOf may produce
+    // spurious matches — an inherent limitation of TruffleHog's offset-free output.
     const rawValue = result.RawV2 || result.Raw;
     if (!rawValue) continue;
 
@@ -81,9 +83,10 @@ export class TruffleHogDetector {
   private binaryPath: string;
   private timeoutMs: number;
 
-  constructor(config: TruffleHogConfig) {
-    this.binaryPath = config.binary_path;
-    this.timeoutMs = config.timeout * 1000;
+  constructor() {
+    const config = getConfig();
+    this.binaryPath = config.secrets_detection.trufflehog.binary_path;
+    this.timeoutMs = config.secrets_detection.trufflehog.timeout * 1000;
   }
 
   /**
@@ -125,7 +128,7 @@ export class TruffleHogDetector {
       };
     } catch (error) {
       console.warn(
-        `[TruffleHog] Detection failed: ${error instanceof Error ? error.message : error}`,
+        `[TruffleHog] Detection failed (binary: ${this.binaryPath}): ${error instanceof Error ? error.message : error}`,
       );
       return { detected: false, matches: [] };
     }
@@ -141,6 +144,7 @@ export class TruffleHogDetector {
         stderr: "pipe",
       });
 
+      // Manual setTimeout used because Bun.spawn does not support AbortSignal
       const timeout = setTimeout(() => proc.kill(), HEALTH_CHECK_TIMEOUT_MS);
       const exitCode = await proc.exited;
       clearTimeout(timeout);
@@ -159,17 +163,20 @@ export class TruffleHogDetector {
     });
 
     // Write text to stdin and close
-    proc.stdin.write(text);
+    await proc.stdin.write(text);
     proc.stdin.end();
 
-    // Set up timeout
+    // Manual setTimeout used because Bun.spawn does not support AbortSignal
     const timeout = setTimeout(() => {
       proc.kill();
     }, this.timeoutMs);
 
     try {
-      const [stdout, exitCode] = await Promise.all([
+      // Drain stdout and stderr concurrently with proc.exited to prevent stderr
+      // pipe buffer from filling and deadlocking the subprocess
+      const [stdout, stderr, exitCode] = await Promise.all([
         new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
         proc.exited,
       ]);
 
@@ -177,7 +184,6 @@ export class TruffleHogDetector {
 
       // TruffleHog exits with 0 on success (regardless of findings)
       if (exitCode !== 0) {
-        const stderr = await new Response(proc.stderr).text();
         throw new Error(`TruffleHog exited with code ${exitCode}: ${stderr.slice(0, 200)}`);
       }
 
@@ -191,9 +197,9 @@ export class TruffleHogDetector {
 
 let detectorInstance: TruffleHogDetector | null = null;
 
-export function getTruffleHogDetector(config: TruffleHogConfig): TruffleHogDetector {
+export function getTruffleHogDetector(): TruffleHogDetector {
   if (!detectorInstance) {
-    detectorInstance = new TruffleHogDetector(config);
+    detectorInstance = new TruffleHogDetector();
   }
   return detectorInstance;
 }
