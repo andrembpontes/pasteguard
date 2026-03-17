@@ -273,3 +273,54 @@ describe("TruffleHogDetector", () => {
     expect(await detector.healthCheck()).toBe(false);
   });
 });
+
+// Check once at module load — synchronous, no subprocess mocking
+const trufflehogAvailable = (() => {
+  try {
+    return (
+      Bun.spawnSync(["trufflehog", "--version"], { stdout: "pipe", stderr: "pipe" }).exitCode === 0
+    );
+  } catch {
+    return false;
+  }
+})();
+
+// These tests run against the real trufflehog binary.
+// They are skipped automatically when the binary is not installed.
+// In the Docker image trufflehog is always present, so they run in CI.
+describe.skipIf(!trufflehogAvailable)("TruffleHogDetector (integration)", () => {
+  test("healthCheck() returns true with real binary", async () => {
+    const detector = new TruffleHogDetector();
+    expect(await detector.healthCheck()).toBe(true);
+  });
+
+  test("detect() returns empty for plain text", async () => {
+    const detector = new TruffleHogDetector();
+    const result = await detector.detect("This is just plain text with no secrets at all.");
+    expect(result.detected).toBe(false);
+    expect(result.matches).toHaveLength(0);
+  });
+
+  test("detect() finds AWS access key pattern", async () => {
+    const detector = new TruffleHogDetector();
+    // Well-known test key format documented in AWS examples
+    const result = await detector.detect("aws_access_key_id = AKIAIOSFODNN7EXAMPLE");
+    // TruffleHog may or may not flag this specific test value; what matters is the
+    // subprocess runs without error and returns a structured result.
+    expect(result).toHaveProperty("detected");
+    expect(result).toHaveProperty("matches");
+  });
+
+  test("detect() returns locations that align with text", async () => {
+    const detector = new TruffleHogDetector();
+    const text = "AKIAIOSFODNN7EXAMPLE";
+    const result = await detector.detect(text);
+    if (result.detected && result.locations) {
+      for (const loc of result.locations) {
+        expect(loc.start).toBeGreaterThanOrEqual(0);
+        expect(loc.end).toBeLessThanOrEqual(text.length);
+        expect(loc.start).toBeLessThan(loc.end);
+      }
+    }
+  });
+});

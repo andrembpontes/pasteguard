@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SecretsDetectionConfig } from "../config";
-import { detectSecrets, detectSecretsBuiltin, mergeResults } from "./detect";
+import { detectSecretsAsync, detectSecretsBuiltin, mergeResults } from "./detect";
 import type { SecretsDetectionResult } from "./patterns/types";
 
 const defaultConfig: SecretsDetectionConfig = {
@@ -182,9 +182,9 @@ describe("detectSecretsBuiltin", () => {
   });
 });
 
-describe("detectSecrets (async)", () => {
+describe("detectSecretsAsync", () => {
   test("returns same results as builtin when trufflehog disabled", async () => {
-    const result = await detectSecrets(opensshKey, defaultConfig);
+    const result = await detectSecretsAsync(opensshKey, defaultConfig);
     expect(result.detected).toBe(true);
     expect(result.matches).toHaveLength(1);
     expect(result.matches[0].type).toBe("OPENSSH_PRIVATE_KEY");
@@ -192,7 +192,7 @@ describe("detectSecrets (async)", () => {
 
   test("returns no detection when disabled", async () => {
     const config: SecretsDetectionConfig = { ...defaultConfig, enabled: false };
-    const result = await detectSecrets(opensshKey, config);
+    const result = await detectSecretsAsync(opensshKey, config);
     expect(result.detected).toBe(false);
   });
 });

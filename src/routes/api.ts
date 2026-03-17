@@ -11,7 +11,7 @@ import { getConfig, type SecretsDetectionConfig } from "../config";
 import { createPlaceholderContext, type PlaceholderContext } from "../masking/context";
 import { filterWhitelistedEntities, getPIIDetector } from "../pii/detect";
 import { mask as maskPII } from "../pii/mask";
-import { detectSecrets } from "../secrets/detect";
+import { detectSecretsAsync } from "../secrets/detect";
 import { maskSecrets } from "../secrets/mask";
 import { getLanguageDetector, type SupportedLanguage } from "../services/language-detector";
 import { logRequest } from "../services/logger";
@@ -199,7 +199,7 @@ apiRoutes.post("/mask", async (c) => {
         trufflehog: config.secrets_detection.trufflehog,
       };
 
-      const secretsResult = await detectSecrets(maskedText, secretsConfig);
+      const secretsResult = await detectSecretsAsync(maskedText, secretsConfig);
 
       if (secretsResult.locations && secretsResult.locations.length > 0) {
         // Capture counters before masking to track new entities

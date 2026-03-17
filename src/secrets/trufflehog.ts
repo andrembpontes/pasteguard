@@ -139,7 +139,7 @@ export class TruffleHogDetector {
    */
   async healthCheck(): Promise<boolean> {
     try {
-      const proc = Bun.spawn([this.binaryPath, "version"], {
+      const proc = Bun.spawn([this.binaryPath, "--version"], {
         stdout: "pipe",
         stderr: "pipe",
       });

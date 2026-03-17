@@ -21,7 +21,7 @@ export interface SecretsProcessResult<TRequest> {
 /**
  * Process a request for secrets detection
  */
-export async function processSecretsRequest<TRequest, TResponse>(
+export async function processSecretsRequestAsync<TRequest, TResponse>(
   request: TRequest,
   config: SecretsDetectionConfig,
   extractor: RequestExtractor<TRequest, TResponse>,

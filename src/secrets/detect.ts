@@ -73,7 +73,7 @@ export function detectSecretsBuiltin(
  * Detects secrets in text using built-in detectors and optionally TruffleHog.
  * Returns merged, deduplicated results.
  */
-export async function detectSecrets(
+export async function detectSecretsAsync(
   text: string,
   config: SecretsDetectionConfig,
 ): Promise<SecretsDetectionResult> {
@@ -90,11 +90,9 @@ export async function detectSecrets(
     return detectSecretsBuiltin(textToScan, noLimitConfig);
   }
 
-  // Run built-in and TruffleHog detection in parallel
-  const [builtinResult, truffleHogResult] = await Promise.all([
-    Promise.resolve(detectSecretsBuiltin(textToScan, noLimitConfig)),
-    getTruffleHogDetector().detect(textToScan),
-  ]);
+  // Run built-in detection (sync) then TruffleHog subprocess (async)
+  const builtinResult = detectSecretsBuiltin(textToScan, noLimitConfig);
+  const truffleHogResult = await getTruffleHogDetector().detect(textToScan);
 
   // Merge results, deduplicating overlapping locations
   return mergeResults(builtinResult, truffleHogResult);
@@ -184,7 +182,7 @@ export async function detectSecretsInSpans(
       if (scanRoles && span.role && !scanRoles.has(span.role)) {
         return [];
       }
-      const result = await detectSecrets(span.text, config);
+      const result = await detectSecretsAsync(span.text, config);
       for (const match of result.matches) {
         matchCounts.set(match.type, (matchCounts.get(match.type) || 0) + match.count);
       }
